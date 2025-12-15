@@ -18,7 +18,7 @@ import re
 LOGIN_URL = "https://app.citytroops.com/"
 TRACKING_URL_TEMPLATE = "https://app.citytroops.com/tracking?user={user_id}&date={date}"
 
-DEFAULT_USER_IDS = [19901, 19904, 19907, 19906, 19900, 19905, 19895, 19896, 19903, 19908]
+DEFAULT_USER_IDS = [19901, 19904, 19907, 19906, 19900, 19905, 19895, 19902, 19903, 19908]
 
 DEFAULT_COLABORADORES = {
     19901: "Carlos Heredia",
