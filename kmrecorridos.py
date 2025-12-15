@@ -28,7 +28,7 @@ DEFAULT_COLABORADORES = {
     19900: "Horacio Benitez",
     19905: "Julissa Anguiano",
     19895: "Laura Leyja",
-    19896: "Luis Huerta",
+    19896: "Luis Villafuerte",
     19903: "Maria Trinidad Hernandez",
     19908: "Yessica Rodriguez",
 }
