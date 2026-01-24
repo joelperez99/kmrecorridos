@@ -85,43 +85,60 @@ def scrap_user(
     chrome_binary: str | None,
     chromedriver_path: str | None,
 ):
-    resultados = []
-    driver = crear_driver(headless=headless, chrome_binary=chrome_binary, chromedriver_path=chromedriver_path)
-    wait = WebDriverWait(driver, 8)
+    """
+    ✅ Robusto:
+    - 2 intentos por usuario (si el driver/login truena, reintenta).
+    - Por cada día, captura CUALQUIER excepción y mete 0.0 (para que no falten filas).
+    """
+    for intento in range(2):
+        driver = None
+        resultados = []
+        try:
+            driver = crear_driver(headless=headless, chrome_binary=chrome_binary, chromedriver_path=chromedriver_path)
+            wait = WebDriverWait(driver, 8)
 
-    try:
-        login(driver, email, password)
+            login(driver, email, password)
 
-        fecha = fecha_inicial
-        while fecha <= fecha_final:
-            fecha_str = fecha.strftime("%Y-%m-%d")
-            url = TRACKING_URL_TEMPLATE.format(user_id=user_id, date=fecha_str)
+            fecha = fecha_inicial
+            while fecha <= fecha_final:
+                fecha_str = fecha.strftime("%Y-%m-%d")
+                url = TRACKING_URL_TEMPLATE.format(user_id=user_id, date=fecha_str)
 
-            try:
-                driver.get(url)
-            except Exception:
-                resultados.append((user_id, colaborador, fecha_str, 0.0))
+                try:
+                    driver.get(url)
+
+                    km_elem = wait.until(
+                        EC.presence_of_element_located((By.XPATH, "//*[contains(., 'Distance traveled')]"))
+                    )
+                    km_text = km_elem.text
+                    match = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*Km", km_text)
+                    km_value = float(match.group(1)) if match else 0.0
+                    resultados.append((user_id, colaborador, fecha_str, km_value))
+
+                except Exception:
+                    # ✅ Pase lo que pase ese día, no se corta el usuario
+                    resultados.append((user_id, colaborador, fecha_str, 0.0))
+
                 fecha += timedelta(days=1)
-                continue
 
-            try:
-                km_elem = wait.until(
-                    EC.presence_of_element_located((By.XPATH, "//*[contains(., 'Distance traveled')]"))
-                )
-                km_text = km_elem.text
-                match = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*Km", km_text)
-                km_value = float(match.group(1)) if match else 0.0
-                resultados.append((user_id, colaborador, fecha_str, km_value))
+            return resultados
 
-            except TimeoutException:
-                resultados.append((user_id, colaborador, fecha_str, 0.0))
+        except Exception:
+            # Reintento
+            if intento == 1:
+                # ✅ Si ya falló 2 veces, rellena todo el rango con 0.0 (para no perder usuario)
+                fecha = fecha_inicial
+                while fecha <= fecha_final:
+                    resultados.append((user_id, colaborador, fecha.strftime("%Y-%m-%d"), 0.0))
+                    fecha += timedelta(days=1)
+                return resultados
 
-            fecha += timedelta(days=1)
-
-    finally:
-        driver.quit()
-
-    return resultados
+        finally:
+            if driver:
+                try:
+                    driver.quit()
+                except Exception:
+                    pass
 
 
 def construir_excel_bytes(rows):
@@ -178,15 +195,15 @@ with col2:
         height=180
     )
 
-# ✅ NUEVO: selector de rango (desde/hasta)
-default_desde = date(2025, 11, 11)
-default_hasta = date(2025, 12, 6)
+# ✅ Selector de rango (desde/hasta)
+default_desde = date(2026, 1, 1)
+default_hasta = date(2026, 1, 15)
 rango = st.date_input(
     "Rango de fechas (desde / hasta)",
     value=(default_desde, default_hasta),
 )
 
-# Normaliza el output (por si el usuario selecciona solo 1 fecha)
+# Normaliza el output (si el usuario selecciona solo 1 fecha)
 if isinstance(rango, (list, tuple)) and len(rango) == 2:
     fecha_inicial, fecha_final = rango
 else:
@@ -225,8 +242,10 @@ if run:
         st.error("Mapa COLABORADORES inválido. Usa formato: 19901=Nombre")
         st.stop()
 
-    # ✅ CAMBIO CLAVE: Fuerza ejecutar TODOS (unión de IDs del textarea + IDs del mapa)
+    # ✅ CAMBIO CLAVE: Fuerza ejecutar TODOS los usuarios (unión)
     user_ids = sorted(set(user_ids) | set(colaboradores.keys()))
+    if not user_ids:
+        user_ids = DEFAULT_USER_IDS.copy()
 
     if fecha_final < fecha_inicial:
         st.error("La fecha final no puede ser menor que la fecha inicial.")
@@ -273,14 +292,14 @@ if run:
 
                     uid_done = filas[0][0] if filas else "N/A"
                     logs.append(f"✔ Usuario completado: {uid_done} → {len(filas)} filas")
-                    log_box.code("\n".join(logs[-20:]))
+                    log_box.code("\n".join(logs[-25:]))
 
                 except Exception as e:
                     completados += 1
                     pct = completados / max(1, len(user_ids))
                     progress.progress(min(1.0, pct))
                     logs.append(f"❌ Error en un usuario: {e}")
-                    log_box.code("\n".join(logs[-20:]))
+                    log_box.code("\n".join(logs[-25:]))
 
     except Exception as e:
         st.error(f"Error general: {e}")
@@ -288,6 +307,18 @@ if run:
 
     fin = time.time()
     st.success(f"✅ Listo. Tiempo total: {fin - inicio:.1f} segundos | Filas: {len(all_rows)}")
+
+    # ✅ VALIDACIÓN: no deben faltar filas ni usuarios
+    esperado = len(user_ids) * total_dias
+    if len(all_rows) != esperado:
+        st.warning(f"⚠️ Faltan filas. Esperadas: {esperado} | Obtenidas: {len(all_rows)}")
+
+    ids_en_resultado = {r[0] for r in all_rows}
+    faltan_ids = sorted(set(user_ids) - ids_en_resultado)
+    if faltan_ids:
+        st.error(f"❌ Usuarios sin ninguna fila (fallaron): {faltan_ids}")
+    else:
+        st.success("✅ Todos los usuarios tienen al menos una fila.")
 
     # Excel en memoria
     xlsx_bytes = construir_excel_bytes(all_rows)
