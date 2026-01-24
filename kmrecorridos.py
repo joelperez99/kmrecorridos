@@ -5,7 +5,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
-from datetime import datetime, timedelta, date
+from datetime import timedelta, date
 from openpyxl import Workbook
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from io import BytesIO
@@ -32,7 +32,6 @@ DEFAULT_COLABORADORES = {
     19903: "Maria Trinidad Hernandez",
     19908: "Yessica Rodriguez",
 }
-
 
 # =========================
 # SELENIUM HELPERS
@@ -75,10 +74,17 @@ def login(driver, email: str, password: str):
     )
 
 
-def scrap_user(user_id: int, colaborador: str, fecha_inicial: date, fecha_final: date,
-              email: str, password: str, headless: bool,
-              chrome_binary: str | None, chromedriver_path: str | None):
-
+def scrap_user(
+    user_id: int,
+    colaborador: str,
+    fecha_inicial: date,
+    fecha_final: date,
+    email: str,
+    password: str,
+    headless: bool,
+    chrome_binary: str | None,
+    chromedriver_path: str | None,
+):
     resultados = []
     driver = crear_driver(headless=headless, chrome_binary=chrome_binary, chromedriver_path=chromedriver_path)
     wait = WebDriverWait(driver, 8)
@@ -172,7 +178,7 @@ with col2:
         height=180
     )
 
-# ✅ NUEVO: selector de rango (desde/hasta) en un solo control
+# ✅ NUEVO: selector de rango (desde/hasta)
 default_desde = date(2025, 11, 11)
 default_hasta = date(2025, 12, 6)
 rango = st.date_input(
@@ -197,7 +203,7 @@ if run:
         st.error("Falta email o password.")
         st.stop()
 
-    # Parse USER_IDS
+    # Parse USER_IDS (texto)
     try:
         user_ids = [int(x.strip()) for x in user_ids_txt.splitlines() if x.strip()]
     except Exception:
@@ -219,6 +225,9 @@ if run:
         st.error("Mapa COLABORADORES inválido. Usa formato: 19901=Nombre")
         st.stop()
 
+    # ✅ CAMBIO CLAVE: Fuerza ejecutar TODOS (unión de IDs del textarea + IDs del mapa)
+    user_ids = sorted(set(user_ids) | set(colaboradores.keys()))
+
     if fecha_final < fecha_inicial:
         st.error("La fecha final no puede ser menor que la fecha inicial.")
         st.stop()
@@ -227,6 +236,7 @@ if run:
     total_trabajo = len(user_ids) * total_dias
 
     st.info(f"Trabajo estimado: **{len(user_ids)} usuarios × {total_dias} días = {total_trabajo} registros**")
+    st.write("User IDs a ejecutar:", user_ids)
 
     progress = st.progress(0)
     log_box = st.empty()
@@ -245,7 +255,7 @@ if run:
                     executor.submit(
                         scrap_user,
                         uid, colaborador,
-                        fecha_inicial, fecha_final,   # ✅ usa el rango seleccionado
+                        fecha_inicial, fecha_final,
                         email, password,
                         headless,
                         chrome_binary.strip() or None,
@@ -261,7 +271,8 @@ if run:
                     pct = completados / max(1, len(user_ids))
                     progress.progress(min(1.0, pct))
 
-                    logs.append(f"✔ Usuario completado: {filas[0][0] if filas else 'N/A'} → {len(filas)} filas")
+                    uid_done = filas[0][0] if filas else "N/A"
+                    logs.append(f"✔ Usuario completado: {uid_done} → {len(filas)} filas")
                     log_box.code("\n".join(logs[-20:]))
 
                 except Exception as e:
@@ -278,6 +289,7 @@ if run:
     fin = time.time()
     st.success(f"✅ Listo. Tiempo total: {fin - inicio:.1f} segundos | Filas: {len(all_rows)}")
 
+    # Excel en memoria
     xlsx_bytes = construir_excel_bytes(all_rows)
 
     filename = f"km_recorridos_{fecha_inicial.strftime('%Y%m%d')}_a_{fecha_final.strftime('%Y%m%d')}.xlsx"
@@ -288,5 +300,6 @@ if run:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
+    # Vista rápida
     st.subheader("🔎 Vista rápida (primeras 50 filas)")
     st.dataframe(all_rows[:50], use_container_width=True)
