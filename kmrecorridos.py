@@ -46,7 +46,6 @@ def crear_driver(headless: bool, chrome_binary: str | None = None, chromedriver_
     options.add_argument("--disable-dev-shm-usage")
 
     if headless:
-        # Chrome moderno
         options.add_argument("--headless=new")
 
     if chrome_binary:
@@ -143,7 +142,6 @@ st.title("📍 CityTroops | KM recorridos (Selenium)")
 with st.sidebar:
     st.header("⚙️ Configuración")
 
-    # Usa secrets si están disponibles
     default_email = st.secrets.get("CITYTROOPS_EMAIL", "")
     default_pass = st.secrets.get("CITYTROOPS_PASSWORD", "")
 
@@ -174,11 +172,20 @@ with col2:
         height=180
     )
 
-dcol1, dcol2 = st.columns(2)
-with dcol1:
-    fecha_inicial = st.date_input("Fecha inicial", value=date(2025, 11, 11))
-with dcol2:
-    fecha_final = st.date_input("Fecha final", value=date(2025, 12, 6))
+# ✅ NUEVO: selector de rango (desde/hasta) en un solo control
+default_desde = date(2025, 11, 11)
+default_hasta = date(2025, 12, 6)
+rango = st.date_input(
+    "Rango de fechas (desde / hasta)",
+    value=(default_desde, default_hasta),
+)
+
+# Normaliza el output (por si el usuario selecciona solo 1 fecha)
+if isinstance(rango, (list, tuple)) and len(rango) == 2:
+    fecha_inicial, fecha_final = rango
+else:
+    fecha_inicial = rango
+    fecha_final = rango
 
 run = st.button("🚀 Ejecutar scraping", type="primary")
 
@@ -227,8 +234,6 @@ if run:
     all_rows = []
 
     inicio = time.time()
-
-    # Para actualizar progreso “por usuario” (aprox).
     completados = 0
 
     try:
@@ -240,7 +245,7 @@ if run:
                     executor.submit(
                         scrap_user,
                         uid, colaborador,
-                        fecha_inicial, fecha_final,
+                        fecha_inicial, fecha_final,   # ✅ usa el rango seleccionado
                         email, password,
                         headless,
                         chrome_binary.strip() or None,
@@ -257,7 +262,7 @@ if run:
                     progress.progress(min(1.0, pct))
 
                     logs.append(f"✔ Usuario completado: {filas[0][0] if filas else 'N/A'} → {len(filas)} filas")
-                    log_box.code("\n".join(logs[-20:]))  # últimos 20 logs
+                    log_box.code("\n".join(logs[-20:]))
 
                 except Exception as e:
                     completados += 1
@@ -273,7 +278,6 @@ if run:
     fin = time.time()
     st.success(f"✅ Listo. Tiempo total: {fin - inicio:.1f} segundos | Filas: {len(all_rows)}")
 
-    # Excel en memoria
     xlsx_bytes = construir_excel_bytes(all_rows)
 
     filename = f"km_recorridos_{fecha_inicial.strftime('%Y%m%d')}_a_{fecha_final.strftime('%Y%m%d')}.xlsx"
@@ -284,6 +288,5 @@ if run:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
-    # Vista rápida
     st.subheader("🔎 Vista rápida (primeras 50 filas)")
     st.dataframe(all_rows[:50], use_container_width=True)
